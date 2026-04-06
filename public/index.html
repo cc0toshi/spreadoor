@@ -88,6 +88,15 @@
     .positive { color: #00ff88; }
     .negative { color: #ff4444; }
     .neutral { color: #ffaa00; }
+    .badge {
+      display: inline-block;
+      padding: 3px 8px;
+      border-radius: 4px;
+      font-size: 0.7rem;
+      font-weight: bold;
+    }
+    .badge.easy { background: rgba(0, 255, 136, 0.15); color: #00ff88; }
+    .badge.hard { background: rgba(255, 170, 0, 0.15); color: #ffaa00; }
     .signal {
       display: inline-block;
       padding: 3px 8px;
@@ -139,6 +148,11 @@
       font-size: 0.85rem;
     }
     .refresh-btn:hover { background: #333; color: #fff; }
+    .note {
+      font-size: 0.75rem;
+      color: #666;
+      font-style: italic;
+    }
     footer {
       margin-top: 40px;
       padding-top: 20px;
@@ -148,6 +162,16 @@
       font-size: 0.8rem;
     }
     footer a { color: #00ff88; text-decoration: none; }
+    .info-box {
+      background: rgba(0, 255, 136, 0.05);
+      border: 1px solid rgba(0, 255, 136, 0.2);
+      border-radius: 8px;
+      padding: 15px;
+      margin-bottom: 20px;
+      font-size: 0.85rem;
+      color: #aaa;
+    }
+    .info-box strong { color: #00ff88; }
   </style>
 </head>
 <body>
@@ -160,6 +184,12 @@
         <button class="refresh-btn" onclick="refresh()">↻ refresh</button>
       </div>
     </header>
+
+    <div class="info-box">
+      <strong>How funding rate arb works:</strong><br>
+      • <strong>EASY</strong> = positive funding → buy spot + short perp on Hyperliquid (delta neutral, collect funding)<br>
+      • <strong>HARD</strong> = negative funding → long perp on HL + short spot elsewhere (need margin on Binance/etc)
+    </div>
 
     <div class="grid">
       <!-- Prices -->
@@ -177,14 +207,15 @@
           <thead>
             <tr>
               <th>Asset</th>
+              <th>Difficulty</th>
               <th>Funding Rate</th>
-              <th>Annualized APR</th>
-              <th>Signal</th>
-              <th>Max Leverage</th>
+              <th>Annualized</th>
+              <th>Strategy</th>
+              <th>Leverage</th>
             </tr>
           </thead>
           <tbody id="fundingBody">
-            <tr><td colspan="5" class="loading">loading...</td></tr>
+            <tr><td colspan="6" class="loading">loading...</td></tr>
           </tbody>
         </table>
       </div>
@@ -250,19 +281,20 @@
         const tbody = document.getElementById('fundingBody');
         
         if (!data.data || data.data.length === 0) {
-          tbody.innerHTML = '<tr><td colspan="5" class="loading">no opportunities found</td></tr>';
+          tbody.innerHTML = '<tr><td colspan="6" class="loading">no opportunities found</td></tr>';
           return;
         }
 
         tbody.innerHTML = data.data.slice(0, 15).map(item => {
           const aprClass = item.annualized < 0 ? 'negative' : 'positive';
-          const signalClass = item.signal.includes('LONG_PERP') ? 'long' : 'short';
+          const diffClass = item.difficulty === 'EASY' ? 'easy' : 'hard';
           return `
             <tr>
               <td><strong>${item.asset}</strong></td>
+              <td><span class="badge ${diffClass}">${item.difficulty}</span></td>
               <td class="${aprClass}">${item.fundingRate.toFixed(4)}%</td>
               <td class="${aprClass}">${item.annualized.toFixed(1)}%</td>
-              <td><span class="signal ${signalClass}">${item.signal.replace(/_/g, ' ')}</span></td>
+              <td class="note">${item.strategy || item.signal}</td>
               <td>${item.leverage}x</td>
             </tr>
           `;
@@ -271,7 +303,7 @@
         document.getElementById('fundingCount').textContent = `(${data.data.length} found)`;
         document.getElementById('lastUpdate').textContent = `updated ${new Date(data.lastUpdate).toLocaleTimeString()}`;
       } catch (e) {
-        document.getElementById('fundingBody').innerHTML = '<tr><td colspan="5" class="loading">error loading data</td></tr>';
+        document.getElementById('fundingBody').innerHTML = '<tr><td colspan="6" class="loading">error loading data</td></tr>';
       }
     }
 
@@ -318,10 +350,7 @@
       await Promise.all([fetchPrices(), fetchFunding(), fetchOpportunities()]);
     }
 
-    // initial load
     loadAll();
-
-    // auto refresh every 60s
     setInterval(loadAll, 60000);
   </script>
 </body>
