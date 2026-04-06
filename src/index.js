@@ -1,10 +1,9 @@
-// spreadoor - cross-market arb finder
+// spreadoor - polymarket edge finder
 import express from 'express';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
-import { findOpportunities, getFundingArb } from './arbfinder.js';
+import { findPolymarketArbs, findInefficientMarkets, findMomentumMarkets, findExpiringMarkets } from './polyarb.js';
 import * as hl from './hyperliquid.js';
-import * as pm from './polymarket.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -12,93 +11,69 @@ const __dirname = dirname(__filename);
 const app = express();
 const PORT = process.env.PORT || 3069;
 
-// cache
 let cache = {
-  opportunities: [],
-  funding: [],
+  inefficient: [],
+  momentum: [],
+  expiring: [],
   lastUpdate: null
 };
 
 async function refresh() {
   try {
-    const [opportunities, funding] = await Promise.all([
-      findOpportunities(),
-      getFundingArb()
+    console.log('refreshing...');
+    const [inefficient, momentum, expiring] = await Promise.all([
+      findInefficientMarkets().catch(e => []),
+      findMomentumMarkets().catch(e => []),
+      findExpiringMarkets().catch(e => [])
     ]);
-    cache = {
-      opportunities,
-      funding,
-      lastUpdate: new Date().toISOString()
-    };
-    console.log(`refreshed: ${opportunities.length} pm opps, ${funding.length} funding arbs`);
+    
+    cache = { inefficient, momentum, expiring, lastUpdate: new Date().toISOString() };
+    console.log(`refreshed: ${inefficient.length} inefficient, ${momentum.length} momentum, ${expiring.length} expiring`);
   } catch (err) {
     console.error('refresh error:', err.message);
   }
 }
 
-// serve static files
 app.use(express.static(join(__dirname, '../public')));
 
-// API routes
 app.get('/api', (req, res) => {
   res.json({
     name: 'spreadoor',
-    version: '0.1.0',
-    description: 'cross-market arb finder for hyperliquid + polymarket',
+    version: '0.3.0',
+    description: 'polymarket edge finder',
     endpoints: {
-      '/': 'dashboard',
-      '/opportunities': 'polymarket vs spot price opportunities',
-      '/funding': 'funding rate arbitrage opportunities',
-      '/prices/:asset': 'get hyperliquid price for asset',
-      '/markets': 'get polymarket crypto markets',
-      '/refresh': 'force refresh data'
+      '/inefficient': 'high spread markets (pricing inefficiency)',
+      '/momentum': 'big price movers (momentum plays)',
+      '/expiring': 'expiring soon + uncertain (theta plays)',
+      '/prices/:asset': 'hyperliquid prices'
     },
     lastUpdate: cache.lastUpdate
   });
 });
 
-app.get('/opportunities', (req, res) => {
-  res.json({
-    count: cache.opportunities.length,
-    lastUpdate: cache.lastUpdate,
-    data: cache.opportunities
-  });
+app.get('/inefficient', (req, res) => {
+  res.json({ count: cache.inefficient.length, lastUpdate: cache.lastUpdate, data: cache.inefficient });
 });
 
-app.get('/funding', (req, res) => {
-  res.json({
-    count: cache.funding.length,
-    lastUpdate: cache.lastUpdate,
-    data: cache.funding
-  });
+app.get('/momentum', (req, res) => {
+  res.json({ count: cache.momentum.length, lastUpdate: cache.lastUpdate, data: cache.momentum });
 });
+
+app.get('/expiring', (req, res) => {
+  res.json({ count: cache.expiring.length, lastUpdate: cache.lastUpdate, data: cache.expiring });
+});
+
+// legacy endpoints
+app.get('/opportunities', (req, res) => res.json({ count: 0, data: [] }));
+app.get('/funding', (req, res) => res.json({ count: 0, data: [] }));
+app.get('/polyarbs', (req, res) => res.json(cache));
+app.get('/mispriced', (req, res) => res.json({ count: cache.inefficient.length, data: cache.inefficient }));
 
 app.get('/prices/:asset', async (req, res) => {
-  const { asset } = req.params;
   try {
-    const spread = await hl.getSpread(asset.toUpperCase());
-    if (!spread) {
-      return res.status(404).json({ error: 'asset not found' });
-    }
+    const spread = await hl.getSpread(req.params.asset.toUpperCase());
+    if (!spread) return res.status(404).json({ error: 'not found' });
     res.json(spread);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.get('/markets', async (req, res) => {
-  try {
-    const markets = await pm.getCryptoPriceMarkets();
-    res.json({
-      count: markets.length,
-      data: markets.map(m => ({
-        question: m.question,
-        conditionId: m.conditionId,
-        volume: m.volume,
-        liquidity: m.liquidityClob,
-        endDate: m.endDate
-      }))
-    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -106,23 +81,12 @@ app.get('/markets', async (req, res) => {
 
 app.get('/refresh', async (req, res) => {
   await refresh();
-  res.json({ status: 'refreshed', lastUpdate: cache.lastUpdate });
+  res.json({ status: 'ok', lastUpdate: cache.lastUpdate });
 });
 
-// start
 await refresh();
 setInterval(refresh, 60000);
 
 app.listen(PORT, () => {
-  console.log(`
-  ╔═══════════════════════════════════════╗
-  ║           S P R E A D O O R           ║
-  ║   cross-market arb finder v0.1.0      ║
-  ╚═══════════════════════════════════════╝
-  
-  dashboard: http://localhost:${PORT}
-  api: http://localhost:${PORT}/api
-  
-  auto-refresh every 60s
-  `);
+  console.log(`spreadoor v0.3.0 running on http://localhost:${PORT}`);
 });
