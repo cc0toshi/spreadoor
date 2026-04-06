@@ -1,0 +1,20 @@
+{
+  "name": "spreadoor",
+  "version": "0.1.0",
+  "description": "cross-market arb bot for hyperliquid + polymarket spreads",
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "monitor": "node src/monitor.js",
+    "dev": "node --watch src/index.js"
+  },
+  "dependencies": {
+    "ethers": "^6.11.0",
+    "express": "^4.18.2",
+    "ws": "^8.16.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
