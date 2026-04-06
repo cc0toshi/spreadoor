@@ -1,8 +1,13 @@
 // spreadoor - cross-market arb finder
 import express from 'express';
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
 import { findOpportunities, getFundingArb } from './arbfinder.js';
 import * as hl from './hyperliquid.js';
 import * as pm from './polymarket.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 const app = express();
 const PORT = process.env.PORT || 3069;
@@ -31,14 +36,17 @@ async function refresh() {
   }
 }
 
-// routes
-app.get('/', (req, res) => {
+// serve static files
+app.use(express.static(join(__dirname, '../public')));
+
+// API routes
+app.get('/api', (req, res) => {
   res.json({
     name: 'spreadoor',
     version: '0.1.0',
     description: 'cross-market arb finder for hyperliquid + polymarket',
     endpoints: {
-      '/': 'this info',
+      '/': 'dashboard',
       '/opportunities': 'polymarket vs spot price opportunities',
       '/funding': 'funding rate arbitrage opportunities',
       '/prices/:asset': 'get hyperliquid price for asset',
@@ -103,7 +111,7 @@ app.get('/refresh', async (req, res) => {
 
 // start
 await refresh();
-setInterval(refresh, 60000); // refresh every minute
+setInterval(refresh, 60000);
 
 app.listen(PORT, () => {
   console.log(`
@@ -112,15 +120,8 @@ app.listen(PORT, () => {
   ║   cross-market arb finder v0.1.0      ║
   ╚═══════════════════════════════════════╝
   
-  server running on http://localhost:${PORT}
-  
-  endpoints:
-    GET /              - api info
-    GET /opportunities - polymarket arbs
-    GET /funding       - funding rate arbs
-    GET /prices/:asset - hyperliquid prices
-    GET /markets       - polymarket crypto markets
-    GET /refresh       - force refresh
+  dashboard: http://localhost:${PORT}
+  api: http://localhost:${PORT}/api
   
   auto-refresh every 60s
   `);
