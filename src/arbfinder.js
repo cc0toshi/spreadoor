@@ -4,8 +4,6 @@ import * as pm from './polymarket.js';
 
 // parse polymarket question to extract price target
 function parseTarget(question) {
-  // "Will Bitcoin be above $100,000 on April 30?"
-  // "ETH above $4000 by end of Q2?"
   const match = question.match(/(\d{1,3}(?:,\d{3})*(?:\.\d+)?)/);
   if (match) {
     return parseFloat(match[1].replace(/,/g, ''));
@@ -13,7 +11,6 @@ function parseTarget(question) {
   return null;
 }
 
-// determine if market is "above" or "below" type
 function parseDirection(question) {
   const q = question.toLowerCase();
   if (q.includes('above') || q.includes('over') || q.includes('reach')) return 'above';
@@ -21,7 +18,6 @@ function parseDirection(question) {
   return null;
 }
 
-// determine asset from question
 function parseAsset(question) {
   const q = question.toLowerCase();
   if (q.includes('bitcoin') || q.includes('btc')) return 'BTC';
@@ -30,21 +26,14 @@ function parseAsset(question) {
   return null;
 }
 
-// calculate implied probability from current price
 function impliedProbFromPrice(currentPrice, targetPrice, direction) {
-  // naive model: linear distance from target
-  // more sophisticated would use volatility/time
   const diff = (targetPrice - currentPrice) / currentPrice;
   
   if (direction === 'above') {
-    // if current > target, high prob of staying above
     if (currentPrice > targetPrice) return 0.85;
-    // if within 5%, flip a coin
     if (Math.abs(diff) < 0.05) return 0.5;
-    // otherwise scale by distance
     return Math.max(0.1, 0.5 - diff * 2);
   } else {
-    // below logic is inverse
     if (currentPrice < targetPrice) return 0.85;
     if (Math.abs(diff) < 0.05) return 0.5;
     return Math.max(0.1, 0.5 + diff * 2);
@@ -73,10 +62,8 @@ export async function findOpportunities() {
     
     if (!targetPrice || !direction) continue;
     
-    // calculate what we think probability should be
     const fairProb = impliedProbFromPrice(currentPrice, targetPrice, direction);
     
-    // get polymarket's current price (probability)
     const pmPrice = market.outcomePrices ? 
       parseFloat(JSON.parse(market.outcomePrices)[0]) : null;
     
@@ -85,7 +72,6 @@ export async function findOpportunities() {
     const edge = fairProb - pmPrice;
     const edgePct = edge * 100;
     
-    // only report if edge > 5%
     if (Math.abs(edgePct) > 5) {
       opportunities.push({
         market: market.question,
@@ -104,7 +90,6 @@ export async function findOpportunities() {
     }
   }
   
-  // sort by absolute edge
   opportunities.sort((a, b) => Math.abs(b.edge) - Math.abs(a.edge));
   
   return opportunities;
@@ -126,20 +111,40 @@ export async function getFundingArb() {
     if (!ctx || !ctx.funding) continue;
     
     const fundingRate = parseFloat(ctx.funding);
-    const annualized = fundingRate * 24 * 365 * 100; // as percentage
+    const annualized = fundingRate * 24 * 365 * 100;
     
-    // if funding rate > 20% annualized, there's arb potential
+    // only flag if funding > 20% annualized
     if (Math.abs(annualized) > 20) {
+      // POSITIVE funding = longs pay shorts = SHORT perp to receive
+      // NEGATIVE funding = shorts pay longs = LONG perp to receive
+      const isPositive = fundingRate > 0;
+      
       arbs.push({
         asset: asset.name,
         fundingRate: fundingRate * 100,
         annualized,
-        signal: fundingRate > 0 ? 'SHORT_PERP_LONG_SPOT' : 'LONG_PERP_SHORT_SPOT',
-        leverage: asset.maxLeverage
+        // positive funding: easy play (buy spot + short perp on HL)
+        // negative funding: hard play (need to short spot elsewhere)
+        difficulty: isPositive ? 'EASY' : 'HARD',
+        strategy: isPositive 
+          ? 'BUY_SPOT + SHORT_PERP (same exchange)' 
+          : 'LONG_PERP + SHORT_SPOT (need margin elsewhere)',
+        signal: isPositive ? 'SHORT_PERP' : 'LONG_PERP',
+        leverage: asset.maxLeverage,
+        note: isPositive 
+          ? 'Can execute on Hyperliquid alone' 
+          : 'Need to short spot on Binance/etc for hedge'
       });
     }
   }
   
-  arbs.sort((a, b) => Math.abs(b.annualized) - Math.abs(a.annualized));
+  // sort by absolute APR but prioritize EASY ones
+  arbs.sort((a, b) => {
+    if (a.difficulty !== b.difficulty) {
+      return a.difficulty === 'EASY' ? -1 : 1;
+    }
+    return Math.abs(b.annualized) - Math.abs(a.annualized);
+  });
+  
   return arbs;
 }
